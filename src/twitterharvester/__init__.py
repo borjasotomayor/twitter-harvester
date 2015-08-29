@@ -1,146 +1,191 @@
-#!/usr/bin/python
-#
-# hack@uchicago Introduction to Python Workshop
-# Borja Sotomayor, 2013-2014
-
-"""Harvest tweets from Twitter
-
-Connects to the Twitter API to either harvest tweets
-from the public stream, or saves tweets from a list
-of accounts.
- 
-For this to work, you need to create an application on
-Twitter under your account (https://dev.twitter.com/apps/new).
-You will get a consumer key and a consumer secret.
-This program expects these values to be stored in
-a file containing the key and the secret in a single 
-line, separated by a space. By default, the program
-will look for a ".twitter-oauth" file in the same
-directory as this program, but a different path
-can be specified with the -c option.
-
-When you first run this program, you will be redirected
-to a twitter webpage where you will have to authorize
-the program to access your account. Every subsequent
-run won't require you to do this (until your credentials
-expire).
-
-The tweets are saved to a file, one tweet per line.
-Each tweet is encoded in JSON. However, the file itself
-is not a valid JSON file (it must be read line by line,
-and each line should be decoded separately).
-
-"""
+# -*- coding: utf-8 -*-
 
 import argparse
 import twitter
+import click
 import json
+import yaml
+import os
 import os.path
 import signal
 import sys
+import codecs
+import locale
+
+# From https://wiki.python.org/moin/PrintFails
+# Otherwise, piping output fails
+sys.stdout = codecs.getwriter(locale.getpreferredencoding())(sys.stdout) 
+
+VERSION = "0.9"
+RELEASE = "0.9.0"
+
+USER_DIR = os.path.expanduser("~/.twitter-harvester")
+
+CONFIG_FILES = [ "/etc/twitter-harvester.conf",
+                USER_DIR + "/config",
+                "./.twitter-harvester.conf"]
+
+USER_CREDENTIALS = USER_DIR + "/credentials"
+
+CONFIG_FIELDS = ["app-name",
+                 "consumer-key",
+                 "consumer-secret"]
+
+outf = None
+
+def error(msg):
+    print msg
+    sys.exit(1)
 
 def signal_handler(signal, frame):
         global outfile
-        outfile.close()
+        if outf != sys.stdout: outf.close()
         print('You pressed Ctrl+C!')
         sys.exit(0)
 
-def parse_command_line_arguments():
-    """Parses the arguments provided through the
-    command line. Run the program with option "-h"
-    to see a human-readable description of the
-    arguments"""
-
-    description, epilog = __doc__.split("\n\n", 1)
-
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=description,
-        epilog=epilog)
-
-    parser.add_argument('-n', '--n', dest='n', action='store', type=int, required=True,
-                       help='Number of tweets to harvest. Set to 0 to keep harvesting until the program is stopped explicitly.')
-    parser.add_argument('-u', '--userfile', dest='userfile', action='store',
-                       help='If specified, only fetch tweets from accounts specified in this file (one per line). The number of tweets per account is specified with the -n parameter.')
-    parser.add_argument('-o', '--outfile', dest='outfile', action='store', required=True,
-                       help='File to store the tweets in')
-    parser.add_argument('-f', '--filter', dest='filter', action='store', required=False,
-                       help='Filter stream by keywords (comma-separated list)')
-    parser.add_argument('-c', '--consumer-credentials', dest='consumer_credentials', action='store',
-                        default="./.twitter-oauth",
-                        help='File with Twitter OAuth credentials (consumer key and secret, separated by a single space)')
-    parser.add_argument('-k', '--user-credentials', dest='user_credentials', action='store',
-                        default="./.twitter-credentials",
-                        help='File with user credentials (fetched with the "OAuth Dance")')
-
-    args = parser.parse_args()
+def load_configuration(config_file):
+    '''
+    Load configuration options. First, load the values specified in 
+    each file in CONFIG_FILES (with values in one file overriding any
+    values specified in the previous one). Next, load the values in
+    config_file (which could be None)
+    '''
     
-    return args
+    config = {}
+    
+    files = CONFIG_FILES
+    if config_file is not None:
+        files.append(config_file)
+    
+    for fname in files:
+        if os.path.exists(fname):
+            with open(fname) as f:
+                fconf = yaml.load(f)
+                if not isinstance(fconf, dict):
+                    error("File {} is not a valid configuration file".format(fname))
+                else:
+                    keys = fconf.keys()
+                    for k in keys:
+                        if k not in CONFIG_FIELDS:
+                            error("File {} contains an invalid field: {}".format(fname, k))
+                    config.update(fconf)
+            
+    return config
+        
 
-def save_tweet(tweet, f):
+def save_tweet(tweet, f, format):
     # Replace HTML entities
     tweet["text"] = tweet["text"].replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
 
-    print >>f, json.dumps(tweet)
+    if format == "text-only":
+        print >>f, tweet["text"]
+    elif format == "human-readable":
+        print >>f, u">>> {} (@{}) - {}".format(tweet["user"]["name"], tweet["user"]["screen_name"], tweet["created_at"])
+        print >>f, u"{}".format(tweet["text"])
+        print >>f, ""        
+    elif format == "json":
+        print >>f, json.dumps(tweet)
 
-if __name__ == "__main__":
 
-    args = parse_command_line_arguments()
+@click.command(name="twitter-harvester")
+@click.option('-c', '--config', type=click.File('r'),
+              help="Configuration file.")
+@click.option('-n', '--num-tweets', type=int, default=0,
+              help="Number of tweets to harvest. Set to 0 to keep harvesting until the program is stopped explicitly.")
+@click.option('-o', '--outfile', type=str, default="-")
+@click.option('--format',  type=click.Choice(['text-only', 'human-readable', 'json']), default="human-readable")
+@click.option('-u', '--user', type=str,
+              help="Fetch all the tweets from this user.")
+@click.option('--users-file', type=click.File('r'),
+              help='Only fetch tweets from users specified in this file (one per line). The number of tweets per account is specified with the -n parameter.')
+@click.option('-f', '--filter', type=str,
+              help='Filter stream by keywords (comma-separated list)')
+@click.option('--filters-file', type=click.File('r'),
+              help='Filter according to the keywords specified in this file (one per line).')
+def cmd(config, num_tweets, outfile, format, user, users_file, filter, filters_file):
+    ''' 
+    TODO: documentation
+    '''
     
+    if not os.path.exists(USER_DIR):
+        os.mkdir(USER_DIR, 0700)
     
-    # OAuth magic
-    consumer_key, consumer_secret = open(args.consumer_credentials).read().strip().split()
+    config = load_configuration(config)
+
+    if not ("app-name" in config and "consumer-key" in config and "consumer-secret" in config):
+        error("Configuration files do not have OAuth fields ('app-name', 'consumer-key', 'consumer-secret')")
+        
+    if not os.path.exists(USER_CREDENTIALS):
+        twitter.oauth_dance(config["app-name"], 
+                            config["consumer-key"], 
+                            config["consumer-secret"], 
+                            USER_CREDENTIALS)        
     
-    if not os.path.exists(args.user_credentials):
-        twitter.oauth_dance("hack@uchicago Python Workshop", consumer_key, consumer_secret, args.user_credentials)
+    oauth_token, oauth_secret = twitter.read_token_file(USER_CREDENTIALS)
     
-    oauth_token, oauth_secret = twitter.read_token_file(args.user_credentials)
+    auth = twitter.OAuth(oauth_token, oauth_secret, config["consumer-key"], config["consumer-secret"])
     
-    auth=twitter.OAuth(oauth_token, oauth_secret, consumer_key, consumer_secret)
-    
-    outfile = open(args.outfile, "w")
-    
-    if args.userfile:
+    global outf
+    if outfile == "-":
+        outf = sys.stdout
+    else:
+        outf = open(outfile, "w")
+        
+    if num_tweets == 0:
+        num_tweets_str = "all"
+    else:
+        num_tweets_str = `num_tweets`
+        
+    if user is not None or users_file is not None:
         t = twitter.Twitter(auth=auth)
     
-        users = open(args.userfile).read().strip().replace("@", "").split()
+        if user is not None:
+            users = [user]
+        elif users_file is not None:
+            users = users_file.read().strip().replace("@", "").split()
+            
         for user in users:
-            print "Fetching %i tweets from @%s" % (args.n, user)
-            tweets = t.statuses.user_timeline(screen_name=user, count=args.n)   
-            print "  (actually fetched %i)" % len(tweets)    
+            if outf != sys.stdout: print "Fetching %i tweets from @%s" % (num_tweets_str, user)
+            tweets = t.statuses.user_timeline(screen_name=user, count=num_tweets)   
+            if outf != sys.stdout: print "  (actually fetched %i)" % len(tweets)    
             for tweet in tweets:
-                save_tweet(tweet, outfile)
+                save_tweet(tweet, outf, format)
     else:
         # Connect to the stream
         twitter_stream = twitter.TwitterStream(auth=auth)
     
-        if args.filter is None:
+        if filter is None and filters_file is None:
             stream = twitter_stream.statuses.sample()
         else:
-            stream = twitter_stream.statuses.filter(track=args.filter)
+            if filter is not None:
+                track = filter
+            elif filters_file is not None:
+                track = ",".join(filters_file.read().strip().split())
+            
+            stream = twitter_stream.statuses.filter(track=track)
     
         # Fetch the tweets
         fetched = 0
     
-        if args.n > 0:
-            print "Fetching %i tweets... " % args.n
+        if num_tweets > 0:
+            if outf != sys.stdout: print "Fetching %i tweets... " % num_tweets
         else:
             signal.signal(signal.SIGINT, signal_handler)
-            print "Fetching tweets. Press Ctrl+C to stop."
+            if outf != sys.stdout: print "Fetching tweets. Press Ctrl+C to stop."
     
         for tweet in stream:
             # The public stream includes tweets, but also other messages, such
             # as deletion notices. We are only interested in the tweets.
-            # See: https://dev.twitter.com/docs/streaming-apis/messages
+            # See: https://dev.twitter.com/streaming/overview/messages-types
             if tweet.has_key("text"):
                 # We also only want English tweets
                 if tweet["lang"] == "en":
-                    save_tweet(tweet, outfile)
+                    save_tweet(tweet, outf, format)
                     fetched += 1
                     if fetched % 100 == 0:
-                        print "Fetched %i tweets." % fetched
-                    if args.n > 0 and fetched >= args.n:
+                        if outf != sys.stdout: print "Fetched %i tweets." % fetched
+                    if num_tweets > 0 and fetched >= num_tweets:
                         break
     
-    outfile.close()
+    if outf != sys.stdout: outfile.close()
 

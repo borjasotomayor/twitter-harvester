@@ -12,6 +12,8 @@ import sys
 import codecs
 import locale
 
+from datetime import datetime
+
 # From https://wiki.python.org/moin/PrintFails
 # Otherwise, piping output fails
 sys.stdout = codecs.getwriter(locale.getpreferredencoding())(sys.stdout) 
@@ -160,8 +162,8 @@ def cmd(config, num_tweets, outfile, format, user, users_file, filter, filters_f
             if filter is not None:
                 track = filter
             elif filters_file is not None:
-                track = ",".join(filters_file.read().strip().split())
-            
+                track = ",".join(filters_file.read().strip().split("\n"))
+
             stream = twitter_stream.statuses.filter(track=track)
     
         # Fetch the tweets
@@ -171,7 +173,9 @@ def cmd(config, num_tweets, outfile, format, user, users_file, filter, filters_f
             if outf != sys.stdout: print "Fetching %i tweets... " % num_tweets
         else:
             signal.signal(signal.SIGINT, signal_handler)
-            if outf != sys.stdout: print "Fetching tweets. Press Ctrl+C to stop."
+            now = datetime.now().isoformat(sep=" ")
+            msg = "[{}] Fetching tweets. Press Ctrl+C to stop.".format(now)
+            if outf != sys.stdout: print msg
     
         for tweet in stream:
             # The public stream includes tweets, but also other messages, such
@@ -183,7 +187,9 @@ def cmd(config, num_tweets, outfile, format, user, users_file, filter, filters_f
                     save_tweet(tweet, outf, format)
                     fetched += 1
                     if fetched % 100 == 0:
-                        if outf != sys.stdout: print "Fetched %i tweets." % fetched
+                        now = datetime.now().isoformat(sep=" ")
+                        msg = "[{}] Fetched {:,} tweets.".format(now, fetched)
+                        if outf != sys.stdout: print msg 
                     if num_tweets > 0 and fetched >= num_tweets:
                         break
     

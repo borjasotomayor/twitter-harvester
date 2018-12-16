@@ -14,12 +14,8 @@ import locale
 
 from datetime import datetime
 
-# From https://wiki.python.org/moin/PrintFails
-# Otherwise, piping output fails
-sys.stdout = codecs.getwriter(locale.getpreferredencoding())(sys.stdout) 
-
 VERSION = "0.9"
-RELEASE = "0.9.0"
+RELEASE = "0.9.1"
 
 USER_DIR = os.path.expanduser("~/.twitter-harvester")
 
@@ -36,7 +32,7 @@ CONFIG_FIELDS = ["app-name",
 outf = None
 
 def error(msg):
-    print msg
+    print(msg)
     sys.exit(1)
 
 def signal_handler(signal, frame):
@@ -66,7 +62,7 @@ def load_configuration(config_file):
                 if not isinstance(fconf, dict):
                     error("File {} is not a valid configuration file".format(fname))
                 else:
-                    keys = fconf.keys()
+                    keys = list(fconf.keys())
                     for k in keys:
                         if k not in CONFIG_FIELDS:
                             error("File {} contains an invalid field: {}".format(fname, k))
@@ -80,13 +76,13 @@ def save_tweet(tweet, f, format):
     tweet["text"] = tweet["text"].replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
 
     if format == "text-only":
-        print >>f, tweet["text"]
+        print(tweet["text"], file=f)
     elif format == "human-readable":
-        print >>f, u">>> {} (@{}) - {}".format(tweet["user"]["name"], tweet["user"]["screen_name"], tweet["created_at"])
-        print >>f, u"{}".format(tweet["text"])
-        print >>f, ""        
+        print(">>> {} (@{}) - {}".format(tweet["user"]["name"], tweet["user"]["screen_name"], tweet["created_at"]), file=f)
+        print("{}".format(tweet["text"]), file=f)
+        print("", file=f)        
     elif format == "json":
-        print >>f, json.dumps(tweet)
+        print(json.dumps(tweet), file=f)
 
 
 @click.command(name="twitter-harvester")
@@ -106,11 +102,11 @@ def save_tweet(tweet, f, format):
               help='Filter according to the keywords specified in this file (one per line).')
 def cmd(config, num_tweets, outfile, format, user, users_file, filter, filters_file):
     ''' 
-    TODO: documentation
+    Harvests tweets from the Twitter public stream, or from a specified list of user accounts.
     '''
     
     if not os.path.exists(USER_DIR):
-        os.mkdir(USER_DIR, 0700)
+        os.mkdir(USER_DIR, 0o700)
     
     config = load_configuration(config)
 
@@ -136,7 +132,7 @@ def cmd(config, num_tweets, outfile, format, user, users_file, filter, filters_f
     if num_tweets == 0:
         num_tweets_str = "all"
     else:
-        num_tweets_str = `num_tweets`
+        num_tweets_str = repr(num_tweets)
         
     if user is not None or users_file is not None:
         t = twitter.Twitter(auth=auth)
@@ -147,9 +143,9 @@ def cmd(config, num_tweets, outfile, format, user, users_file, filter, filters_f
             users = users_file.read().strip().replace("@", "").split()
             
         for user in users:
-            if outf != sys.stdout: print "Fetching %i tweets from @%s" % (num_tweets_str, user)
+            if outf != sys.stdout: print("Fetching %s tweets from @%s" % (num_tweets_str, user))
             tweets = t.statuses.user_timeline(screen_name=user, count=num_tweets)   
-            if outf != sys.stdout: print "  (actually fetched %i)" % len(tweets)    
+            if outf != sys.stdout: print("  (actually fetched %i)" % len(tweets))    
             for tweet in tweets:
                 save_tweet(tweet, outf, format)
     else:
@@ -170,18 +166,18 @@ def cmd(config, num_tweets, outfile, format, user, users_file, filter, filters_f
         fetched = 0
     
         if num_tweets > 0:
-            if outf != sys.stdout: print "Fetching %i tweets... " % num_tweets
+            if outf != sys.stdout: print("Fetching %i tweets... " % num_tweets)
         else:
             signal.signal(signal.SIGINT, signal_handler)
             now = datetime.now().isoformat(sep=" ")
             msg = "[{}] Fetching tweets. Press Ctrl+C to stop.".format(now)
-            if outf != sys.stdout: print msg
+            if outf != sys.stdout: print(msg)
     
         for tweet in stream:
             # The public stream includes tweets, but also other messages, such
             # as deletion notices. We are only interested in the tweets.
             # See: https://dev.twitter.com/streaming/overview/messages-types
-            if tweet.has_key("text"):
+            if "text" in tweet:
                 # We also only want English tweets
                 if tweet["lang"] == "en":
                     save_tweet(tweet, outf, format)
@@ -189,9 +185,9 @@ def cmd(config, num_tweets, outfile, format, user, users_file, filter, filters_f
                     if fetched % 100 == 0:
                         now = datetime.now().isoformat(sep=" ")
                         msg = "[{}] Fetched {:,} tweets.".format(now, fetched)
-                        if outf != sys.stdout: print msg 
+                        if outf != sys.stdout: print(msg) 
                     if num_tweets > 0 and fetched >= num_tweets:
                         break
     
-    if outf != sys.stdout: outfile.close()
+    if outf != sys.stdout: outf.close()
 

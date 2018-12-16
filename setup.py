@@ -31,8 +31,6 @@
 #
 # -------------------------------------------------------------------------- #
 
-from ez_setup import use_setuptools
-use_setuptools(version="18.1")
 from setuptools import setup, find_packages
 import sys
 
@@ -50,8 +48,9 @@ setup(name='twitter-harvester',
       url='http://people.cs.uchicago.edu/~borja/',
       package_dir = {'': 'src'},
       packages=find_packages("src"),
+      python_requires='>=3.5',
 
-      install_requires = [ "twitter >= 1.17.1", "click >= 5.1" ],
+      install_requires = [ "twitter >= 1.18.0", "click >= 6.7" ],
 
       setup_requires = [ "setuptools_git >= 1.0" ],
 
@@ -70,7 +69,7 @@ setup(name='twitter-harvester',
           'Intended Audience :: Education',
           'License :: OSI Approved :: BSD License',
           'Operating System :: POSIX',
-          'Programming Language :: Python :: 2',
-          'Programming Language :: Python :: 2 :: Only',
+          'Programming Language :: Python :: 3',
+          'Programming Language :: Python :: 3 :: Only',
           ]
      )

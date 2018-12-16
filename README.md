@@ -53,6 +53,10 @@ Print tweets from the public stream (press Ctrl-C to stop):
 
     twitter-harvester
 
+Print tweets from the public stream that include the keyword `coffee` (press Ctrl-C to stop):
+
+    twitter-harvester -f coffee
+
 Print ten tweets from the public stream:
 
     twitter-harvester -n 10
